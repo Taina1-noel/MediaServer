@@ -77,7 +77,8 @@ namespace MediaServer
                 Console.WriteLine("Waiting connection ...");
                 maxNumberAcceptedClients.WaitOne();
                 
-				//TODO: You probably want to do something here
+e.AcceptSocket = null;  // Reset socket before reuse
+pending = socServer.AcceptAsync(e);
 
                 
             }
@@ -149,57 +150,49 @@ namespace MediaServer
             maxNumberAcceptedClients.Release();
             Console.WriteLine("A client has been disconnected from the server. There are {0} clients connected to the server", connections);
         }
-        
-		//TODO: Finish implementation. Analyze through the entire method.
-        private void BusinessLogic(string request, Socket handler)
-        {
-            
-            string[] requestLines = GetRequestLines(request);
-            List<KeyValuePair<string, string>> headers = GetHeaders(requestLines);
-            KeyValuePair<string, string> methodAndPath = GetMethodAndPath(requestLines);
+private void BusinessLogic(string request, Socket handler)
+{
+    // split the raw HTTP request into lines
+    var requestLines = GetRequestLines(request);
 
-			//TODO: You probably want to do something here
-            String methPath = String.Format("Method: {0} | path: {1}",methodAndPath.Key, methodAndPath.Value);
+    // extract headers from those lines
+   var headers = GetHeaders(requestLines);
 
-            if(methodAndPath.Value.Contains("favicon.ico".ToLower()))
-            {
-                CloseClientSocket(handler);
-                return;
-            }
-            else
-                {
-                StringBuilder sb = new StringBuilder();
-                sb.Append(methPath + Environment.NewLine);
-                foreach (KeyValuePair<string, string> pair in headers)
-                {
-                    sb.Append(String.Format("{0}:{1}"+Environment.NewLine, pair.Key, pair.Value));
-                }
-                logger.LogDebug(sb.ToString());
-                if (methodAndPath.Key.Equals(""))
-                {
-                    HandleHead(handler, headers, methodAndPath.Value);
-                }
-                else if (methodAndPath.Key.Equals(" "))
-                {
-                    HandleGet(handler, headers, methodAndPath.Value);
-                }
-                else
-                {
-                    CloseClientSocket(handler);
-                }
-            }
-        }
-        
-        //TODO: Finish implementation
-        /// <summary>
-        /// This method takes the raw request splits it based on end of line, and returns each line in a string array
-        /// </summary>
-        /// <param name="request">The raw request</param>
-        /// <returns>A string array with each cell being a line in the request</returns>
-        private string[] GetRequestLines(string request)
-        {
+    // parse the first line into (method, path)
+    var (method, path) = GetMethodAndPath(requestLines[0]);
 
-        }
+    if (method.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
+    {
+        HandleHead(handler, headers, path);
+    }
+    else if (method.Equals("GET", StringComparison.OrdinalIgnoreCase))
+    {
+        HandleGet(handler, headers, path);
+    }
+    else
+    {
+        SendNotImplemented(handler);
+    }
+}
+
+private void SendNotImplemented(Socket handler)
+{
+    const string response =
+        "HTTP/1.1 501 Not Implemented\r\n" +
+        "Connection: close\r\n" +
+        "\r\n";
+    handler.Send(Encoding.ASCII.GetBytes(response));
+}
+
+
+
+
+private string[] GetRequestLines(string rawRequest)
+{
+    return rawRequest.Split(new[] { "\r\n" }, StringSplitOptions.None);
+}
+
+
 
         //TODO: Implement
         /// <summary>
@@ -207,10 +200,15 @@ namespace MediaServer
         /// </summary>
         /// <param name="requestLines">The request lines</param>
         /// <returns>Key Value Pair containing the method as a key and the path as the value</returns>
-        private KeyValuePair<string, string> GetMethodAndPath(string[] requestLines)
-        {
-  
-        }
+      private KeyValuePair<string, string> GetMethodAndPath(string[] requestLines)
+{
+    if (requestLines.Length == 0) return new KeyValuePair<string, string>("", "");
+    string[] tokens = requestLines[0].Split(' ');
+    if (tokens.Length < 2) return new KeyValuePair<string, string>("", "");
+    return new KeyValuePair<string, string>(tokens[0], tokens[1]);
+}
+
+
 
         //TODO: Implement
         /// <summary>
@@ -218,20 +216,34 @@ namespace MediaServer
         /// </summary>
         /// <param name="requestLines">The request as a string array</param>
         /// <returns>List of key value pairs where the each header name is key and their contents is their value</returns>
-        private List<KeyValuePair<string,string>> GetHeaders(string[] requestLines)
-        {
-            
-            try
-            {
-                
-            }
-            catch(Exception ex) 
-            {
-                logger.LogCritical(ex,"Exception getting headers");
-            }
+        private List<KeyValuePair<string, string>> GetHeaders(string[] requestLines)
+{
+    var headers = new List<KeyValuePair<string, string>>();
 
-            return headers;
+    try
+    {
+        for (int i = 1; i < requestLines.Length; i++)
+        {
+            string line = requestLines[i];
+            if (string.IsNullOrWhiteSpace(line)) break; // End of headers
+
+            int colonIndex = line.IndexOf(':');
+            if (colonIndex > 0)
+            {
+                string key = line.Substring(0, colonIndex).Trim().ToLower() + ":";
+                string value = line.Substring(colonIndex + 1).Trim();
+                headers.Add(new KeyValuePair<string, string>(key, value));
+            }
         }
+    }
+    catch (Exception ex)
+    {
+        logger.LogCritical(ex, "Exception getting headers");
+    }
+
+    return headers;
+}
+
 
         private int GetIndexFromPath(string path)
         {
@@ -261,15 +273,22 @@ namespace MediaServer
             logger.LogDebug("GET requested for file: {0}", requestFile);
 
             FileInfo fileInfo = new FileInfo(requestFile);
-            if (fileInfo.Exists)
-            {
-			
-				//TODO: You probably want to do something here
+        if (fileInfo.Exists)
+{
+    string contentType = GetContentType(requestFile);
+    string response = "HTTP/1.1 200 OK\r\n" +
+                      $"Content-Type: {contentType}\r\n" +
+                      $"Content-Length: {fileInfo.Length}\r\n" +
+                      "Connection: close\r\n\r\n";
+    handler.Send(Encoding.UTF8.GetBytes(response));
+    CloseClientSocket(handler);
+}
+else
+{
+    CloseClientSocket(handler);
+}
 
-            }
-            CloseClientSocket(handler);
         }
-
         private void HandleGet(Socket handler, List<KeyValuePair<string, string>> headers, string path)
         {
             int index = GetIndexFromPath(path);
@@ -294,28 +313,35 @@ namespace MediaServer
         /// 
         /// </summary>
         /// <param name="handler">The socket to write the webpage to</param>
-        private void ReturnList(Socket handler)
-        {
-            string template = File.ReadAllText("template.txt");
-            string media = "";
-            string[] files = availableMedia.getAvailableFiles().ToArray();
+       private void ReturnList(Socket handler)
+{
+    string template = File.ReadAllText("template.txt");
+    string media = "";
+    string[] files = availableMedia.getAvailableFiles().ToArray();
 
-            //TODO: You probably want to do something here
+    for (int i = 0; i < files.Length; i++)
+    {
+        string fileName = Path.GetFileName(files[i]);
+        media += $"<a href=\"/{i}\">{fileName}</a><br/>";
+    }
 
-            string ContentType = "text/html";
-            string Reply = "HTTP/1.1 200 OK" + Environment.NewLine + "Server: VLC" + Environment.NewLine + "Content-Type: " + ContentType + Environment.NewLine;
-            Reply += "Last-Modified: " + GMTTime(DateTime.Now) + Environment.NewLine;//Just dream up a date
-            Reply += "Date: " + GMTTime(DateTime.Now) + Environment.NewLine;
-            Reply += "Accept-Ranges: bytes" + Environment.NewLine;
-            UTF8Encoding encoding = new UTF8Encoding();
-            byte[] bytes = encoding.GetBytes(template);
-            long length = bytes.Length;
-            Reply += "Content-Length: " + length + Environment.NewLine;
-            Reply += "Connection: close" + Environment.NewLine + Environment.NewLine;
-            handler.Send(UTF8Encoding.UTF8.GetBytes(Reply), SocketFlags.None);
-            handler.Send(bytes);
-            CloseClientSocket(handler);
-        }
+    template = template.Replace("[MEDIA_LIST]", media);
+
+    string ContentType = "text/html";
+    string Reply = "HTTP/1.1 200 OK" + Environment.NewLine + "Server: VLC" + Environment.NewLine + "Content-Type: " + ContentType + Environment.NewLine;
+    Reply += "Last-Modified: " + GMTTime(DateTime.Now) + Environment.NewLine;
+    Reply += "Date: " + GMTTime(DateTime.Now) + Environment.NewLine;
+    Reply += "Accept-Ranges: bytes" + Environment.NewLine;
+    UTF8Encoding encoding = new UTF8Encoding();
+    byte[] bytes = encoding.GetBytes(template);
+    long length = bytes.Length;
+    Reply += "Content-Length: " + length + Environment.NewLine;
+    Reply += "Connection: close" + Environment.NewLine + Environment.NewLine;
+    handler.Send(UTF8Encoding.UTF8.GetBytes(Reply), SocketFlags.None);
+    handler.Send(bytes);
+    CloseClientSocket(handler);
+}
+
 
 		//TODO: Finish implementation
         /// <summary>
@@ -346,12 +372,16 @@ namespace MediaServer
             FileSenderHeler fsHelper = new FileSenderHeler(requestFile, handler, tempRange);
             if (!hasRange || requestFile.ToLower().EndsWith(".jpg") || requestFile.ToLower().EndsWith(".png") || requestFile.ToLower().EndsWith(".gif") || requestFile.ToLower().EndsWith(".mp3"))
             {
-                //TODO: ? hint: must use fsHelper
+                Thread noRangeThread = new Thread(NoRangeSend);
+noRangeThread.Start(fsHelper);
+
             }
             else
             {
                 //Probably a large file
-                //TODO: ? hint: must use fsHelper
+               Thread rangeThread = new Thread(SendWithRange);
+rangeThread.Start(fsHelper);
+
             }
         }
 
@@ -387,7 +417,12 @@ namespace MediaServer
             while (this.running && handler.Connected && chunkSize > 0)
             {
 			
-				//TODO: You probably want to do something here
+byte[] buffer = new byte[chunkSize];
+int bytesRead;
+while ((bytesRead = fsFile.Read(buffer, 0, buffer.Length)) > 0)
+{
+    handler.Send(buffer, bytesRead, SocketFlags.None);
+}
             }
             fsFile.Close();
             CloseClientSocket(handler);
@@ -425,7 +460,11 @@ namespace MediaServer
             bytesSent = range;
             while (this.running && handler.Connected && byteToSend > 0)
             {
-                //TODO: You probably want to do something here
+int bytesRead = fs.Read(buf, 0, buf.Length);
+if (bytesRead <= 0) break;
+handler.Send(buf, bytesRead, SocketFlags.None);
+bytesSent += bytesRead;
+byteToSend = fileLength - bytesSent;
             }
             if (!this.running) { try { fs.Close(); fs = null; } catch {; } }
             CloseClientSocket(handler);

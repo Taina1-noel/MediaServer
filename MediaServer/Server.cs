@@ -150,46 +150,65 @@ pending = socServer.AcceptAsync(e);
             maxNumberAcceptedClients.Release();
             Console.WriteLine("A client has been disconnected from the server. There are {0} clients connected to the server", connections);
         }
-private void BusinessLogic(string request, Socket handler)
+private void BusinessLogic(string request, Socket conn)
 {
-    // split the raw HTTP request into lines
+    // 1. Break the raw request into lines & headers
     var requestLines = GetRequestLines(request);
+    var headers      = GetHeaders(requestLines);
 
-    // extract headers from those lines
-   var headers = GetHeaders(requestLines);
-
-    // parse the first line into (method, path)
+    // 2. Parse the request-line ("GET /foo HTTP/1.1") into (method, path)
     var (method, path) = GetMethodAndPath(requestLines[0]);
 
-    if (method.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
+    // 3. Dispatch on the HTTP method
+    switch (method.ToUpperInvariant())
     {
-        HandleHead(handler, headers, path);
-    }
-    else if (method.Equals("GET", StringComparison.OrdinalIgnoreCase))
-    {
-        HandleGet(handler, headers, path);
-    }
-    else
-    {
-        SendNotImplemented(handler);
-    }
-}
+        case "HEAD":
+            HandleHead(conn, headers, path);
+            break;
 
-private void SendNotImplemented(Socket handler)
-{
-    const string response =
-        "HTTP/1.1 501 Not Implemented\r\n" +
-        "Connection: close\r\n" +
-        "\r\n";
-    handler.Send(Encoding.ASCII.GetBytes(response));
+        case "GET":
+            HandleGet(conn, headers, path);
+            break;
+
+    
+
 }
 
 
+ }   // closes the switch
+ // closes the surrounding method (BusinessLogic/ProcessRequest)
 
 
+    /// <summary>Split the raw request into lines.</summary>
+    
+
+
+
+
+
+ /// <summary>Split the raw request into lines.</summary>
 private string[] GetRequestLines(string rawRequest)
+    => rawRequest.Split(new[] { "\r\n" }, StringSplitOptions.None);
+
+/// <summary>Parse headers from lines[1..] until the first blank line.</summary>
+private List<KeyValuePair<string,string>> GetHeaders(string[] requestLines)
 {
-    return rawRequest.Split(new[] { "\r\n" }, StringSplitOptions.None);
+    var headers = new List<KeyValuePair<string,string>>();
+    for (int i = 1; i < requestLines.Length && requestLines[i] != ""; i++)
+    {
+        var parts = requestLines[i].Split(new[] { ':' }, 2);
+        if (parts.Length == 2)
+            headers.Add(new(parts[0].Trim(), parts[1].Trim()));
+    }
+    return headers;
+}
+
+/// <summary>Parse the request-line into (Method, Path).</summary>
+private (string Method, string Path) GetMethodAndPath(string requestLine)
+{
+    // e.g. "GET /song.mp3 HTTP/1.1"
+    var parts = requestLine.Split(' ', 3);
+    return (parts[0], parts[1]);
 }
 
 
@@ -210,39 +229,6 @@ private string[] GetRequestLines(string rawRequest)
 
 
 
-        //TODO: Implement
-        /// <summary>
-        /// This method returns the headers submitted in the request as a list of key value pairs
-        /// </summary>
-        /// <param name="requestLines">The request as a string array</param>
-        /// <returns>List of key value pairs where the each header name is key and their contents is their value</returns>
-        private List<KeyValuePair<string, string>> GetHeaders(string[] requestLines)
-{
-    var headers = new List<KeyValuePair<string, string>>();
-
-    try
-    {
-        for (int i = 1; i < requestLines.Length; i++)
-        {
-            string line = requestLines[i];
-            if (string.IsNullOrWhiteSpace(line)) break; // End of headers
-
-            int colonIndex = line.IndexOf(':');
-            if (colonIndex > 0)
-            {
-                string key = line.Substring(0, colonIndex).Trim().ToLower() + ":";
-                string value = line.Substring(colonIndex + 1).Trim();
-                headers.Add(new KeyValuePair<string, string>(key, value));
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        logger.LogCritical(ex, "Exception getting headers");
-    }
-
-    return headers;
-}
 
 
         private int GetIndexFromPath(string path)
@@ -524,4 +510,6 @@ byteToSend = fileLength - bytesSent;
             return Reply + Environment.NewLine;
         }
     }
-}
+    }
+
+

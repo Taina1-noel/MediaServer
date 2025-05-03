@@ -5,8 +5,9 @@ namespace MediaServer
 {
     public class AvailableMedia
     {
-        static private string[] fileArray;
-        static string path;
+       // ↓ give them a non-null default
+static private string[] fileArray = Array.Empty<string>();
+static        string   path      = string.Empty;
 
         public AvailableMedia(string path)
         {
